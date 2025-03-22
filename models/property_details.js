@@ -11,30 +11,35 @@ const propertyDetailsSchema = new mongoose.Schema(
 			lowercase: true,
 			required: true,
 		},
+
 		propertyName_OtherLanguage: {
 			type: String,
 			trim: true,
 			lowercase: true,
 			default: "",
 		},
+
 		propertyCountry: {
 			type: String,
 			trim: true,
 			lowercase: true,
-			default: "",
+			default: "India",
 		},
+
 		propertyState: {
 			type: String,
 			trim: true,
 			lowercase: true,
 			default: "",
 		},
+
 		propertyCity: {
 			type: String,
 			trim: true,
 			lowercase: true,
 			default: "",
 		},
+
 		aboutProperty: {
 			type: String,
 			trim: true,
@@ -55,18 +60,34 @@ const propertyDetailsSchema = new mongoose.Schema(
 			lowercase: true,
 			default: "",
 		},
+
 		propertyAddress: {
 			type: String,
 			trim: true,
 			lowercase: true,
 			default: "",
 		},
+
 		propertyFloors: {
 			// How many floors in the property
 			type: Number,
 		},
+
 		overallRoomsCount: {
 			type: Number,
+		},
+
+		bathRoomsCount: {
+			type: Number,
+			default: 1,
+		},
+
+		propertySize: {
+			type: Object,
+			default: {
+				size: 0,
+				unit: "square meter",
+			},
 		},
 
 		userViews: {

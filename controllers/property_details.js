@@ -4,20 +4,28 @@ const mongoose = require("mongoose");
 const _ = require("lodash");
 const axios = require("axios");
 
-exports.propertyTypeById = (req, res, next, id) => {
+exports.propertyTypeById = async (req, res, next, id) => {
+	// 1) Validate ID
 	if (!mongoose.Types.ObjectId.isValid(id)) {
 		return res.status(400).json({ error: "Invalid property ID" });
 	}
 
-	PropertyDetails.findById(id).exec((err, propertyDetails) => {
-		if (err || !propertyDetails) {
-			return res.status(400).json({
-				error: "Property details were not found",
-			});
+	try {
+		// 2) Await the query without a callback
+		const propertyDetails = await PropertyDetails.findById(id);
+
+		// 3) If not found, respond with an error
+		if (!propertyDetails) {
+			return res.status(400).json({ error: "Property details were not found" });
 		}
+
+		// 4) Attach the found doc to req and call next
 		req.propertyDetails = propertyDetails;
 		next();
-	});
+	} catch (err) {
+		console.error(err);
+		return res.status(500).json({ error: "Something went wrong" });
+	}
 };
 
 exports.create = async (req, res) => {
