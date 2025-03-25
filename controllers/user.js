@@ -7,7 +7,7 @@ exports.userById = async (req, res, next, id) => {
 	console.log(id, "id");
 	try {
 		const user = await User.findById(id).select(
-			"_id name email phone role user points activePoints likesUser activeUser employeeImage userRole history userStore userBranch"
+			"_id name email phone role activeUser profilePhoto userRole"
 		);
 
 		if (!user) {
@@ -26,22 +26,26 @@ exports.userById = async (req, res, next, id) => {
 	}
 };
 
-exports.updatedUserId = (req, res, next, id) => {
-	User.findById(id)
-		.select(
-			"_id name email phone role user points activePoints likesUser activeUser employeeImage userRole history userStore userBranch"
-		)
+exports.updatedUserId = async (req, res, next, id) => {
+	try {
+		const userNeedsUpdate = await User.findById(id)
+			.select(
+				"_id name email phone role user points activePoints likesUser activeUser profilePhoto userRole history userStore userBranch"
+			)
+			.exec(); // Promise-based
 
-		.exec((err, userNeedsUpdate) => {
-			console.log(err, "user not found yad");
-			if (err || !userNeedsUpdate) {
-				return res.status(400).json({
-					error: "user not found yad",
-				});
-			}
-			req.updatedUserByAdmin = userNeedsUpdate;
-			next();
-		});
+		if (!userNeedsUpdate) {
+			return res.status(400).json({
+				error: "user not found yad",
+			});
+		}
+
+		req.updatedUserByAdmin = userNeedsUpdate;
+		next();
+	} catch (err) {
+		console.log("updatedUserId error:", err);
+		return res.status(400).json({ error: "user not found yad" });
+	}
 };
 
 exports.read = (req, res) => {
@@ -66,9 +70,7 @@ exports.remove = (req, res) => {
 
 exports.allUsersList = (req, res) => {
 	User.find()
-		.select(
-			"_id name email role user points activePoints likesUser activeUser employeeImage userRole history userStore userBranch"
-		)
+		.select("_id name email phone role activeUser profilePhoto userRole")
 		.exec((err, users) => {
 			if (err) {
 				return res.status(400).json({
@@ -121,166 +123,99 @@ exports.update = (req, res) => {
 	});
 };
 
-exports.updateUserByAdmin = (req, res) => {
-	const {
-		name,
-		password,
-		role,
-		activeUser,
-		employeeImage,
-		email,
-		userRole,
-		userStore,
-		userBranch,
-	} = req.body.updatedUserByAdmin;
+exports.updateUserByAdmin = async (req, res) => {
+	try {
+		// Destructure fields from the request body
+		const { name, password, activeUser, profilePhoto, email, phone } = req.body;
 
-	User.findOne({ _id: req.body.updatedUserByAdmin.userId }, (err, user) => {
-		if (err || !user) {
-			return res.status(400).json({
-				error: "User not found",
-			});
+		// This comes from the URL param, e.g. /user-account/:updatedUserId/:userId
+		const { updatedUserId } = req.params;
+
+		// Find the user to update
+		const user = await User.findById(updatedUserId).exec();
+		if (!user) {
+			return res.status(400).json({ error: "User not found" });
 		}
+
+		// Validation checks (required fields)
 		if (!name) {
-			return res.status(400).json({
-				error: "Name is required",
-			});
+			return res.status(400).json({ error: "Name is required" });
 		} else {
 			user.name = name;
 		}
 
 		if (password) {
 			if (password.length < 6) {
-				return res.status(400).json({
-					error: "Password should be min 6 characters long",
-				});
-			} else {
-				user.password = password;
+				return res
+					.status(400)
+					.json({ error: "Password should be at least 6 characters long" });
 			}
-		}
-
-		if (!role) {
-			return res.status(400).json({
-				error: "Role is required",
-			});
-		} else {
-			user.role = role;
+			user.password = password;
 		}
 
 		if (!email) {
-			return res.status(400).json({
-				error: "Email is required",
-			});
+			return res.status(400).json({ error: "Email is required" });
 		} else {
 			user.email = email;
 		}
 
-		if (!activeUser) {
-			return res.status(400).json({
-				error: "activeUser is required",
-			});
+		if (typeof activeUser === "undefined") {
+			return res.status(400).json({ error: "activeUser is required" });
 		} else {
 			user.activeUser = activeUser;
 		}
 
-		if (!employeeImage) {
-			return res.status(400).json({
-				error: "employeeImage is required",
-			});
+		if (!profilePhoto) {
+			// If your schema always expects an object: { public_id, url }, validate
+			return res.status(400).json({ error: "profilePhoto is required" });
 		} else {
-			user.employeeImage = employeeImage;
+			user.profilePhoto = profilePhoto;
 		}
 
-		if (!userRole) {
-			return res.status(400).json({
-				error: "User Role Is Required",
-			});
-		} else {
-			user.userRole = userRole;
+		// phone might be optional (if you want it required, validate similarly)
+		if (phone) {
+			user.phone = phone;
 		}
 
-		if (!userStore) {
-			return res.status(400).json({
-				error: "User Store Is Required",
-			});
-		} else {
-			user.userStore = userStore;
-		}
+		// Save updates
+		const updatedUser = await user.save();
 
-		if (!userBranch) {
-			return res.status(400).json({
-				error: "User Store Is Required",
-			});
-		} else {
-			user.userBranch = userBranch;
-		}
+		// Remove sensitive fields
+		updatedUser.hashed_password = undefined;
+		updatedUser.salt = undefined;
 
-		user.save((err, updatedUser) => {
-			if (err) {
-				console.log("USER UPDATE ERROR", err);
-				return res.status(400).json({
-					error: "User update failed",
-				});
-			}
-			updatedUser.hashed_password = undefined;
-			updatedUser.salt = undefined;
-			res.json(updatedUser);
-		});
-	});
-};
-
-exports.getSingleUser = (req, res) => {
-	const { accountId } = req.params; // Get accountId from URL parameters
-	const belongsTo = mongoose.Types.ObjectId(accountId);
-
-	User.findOne({ _id: belongsTo })
-		.populate("hotelIdsOwner") // Populate the hotelIdsOwner field
-		.exec((err, user) => {
-			if (err || !user) {
-				return res.status(400).json({
-					error: "User not found",
-				});
-			}
-			// Optional: Remove sensitive information from user object
-			user.hashed_password = undefined;
-			user.salt = undefined;
-
-			res.json(user); // Send the user data as a response
-		});
-};
-
-exports.houseKeepingStaff = async (req, res) => {
-	const { hotelId } = req.params;
-
-	try {
-		const staffList = await User.find({
-			hotelIdWork: hotelId,
-			role: 5000,
-		}).select("_id name email role"); // You can adjust the fields you want to select
-
-		res.json(staffList);
+		return res.json(updatedUser);
 	} catch (err) {
-		console.error(err);
-		res.status(500).json({
-			error: "Error retrieving housekeeping staff list",
+		console.log("USER UPDATE ERROR", err);
+		return res.status(400).json({
+			error: "User update failed",
 		});
 	}
 };
 
-exports.allHotelAccounts = (req, res) => {
-	User.find({ role: 2000 })
-		.select(
-			"_id name email role points activePoints likesUser activeUser employeeImage userRole history userStore userBranch hotelIdsOwner"
-		)
-		.populate(
-			"hotelIdsOwner",
-			"_id hotelName hotelCountry hotelState hotelCity hotelAddress"
-		)
-		.exec((err, users) => {
-			if (err) {
-				return res.status(400).json({
-					error: "Users not found",
-				});
-			}
-			res.json(users);
+exports.getSingleUser = async (req, res) => {
+	try {
+		const { accountId } = req.params;
+
+		// If you need to manually convert the string to ObjectId, do:
+		// const belongsTo = new mongoose.Types.ObjectId(accountId);
+
+		// Otherwise, just pass the string directly:
+		const user = await User.findOne({ _id: accountId }).exec(); // `.exec()` returns a Promise if no callback is provided
+
+		if (!user) {
+			return res.status(400).json({ error: "User not found" });
+		}
+
+		// Remove sensitive info
+		user.hashed_password = undefined;
+		user.salt = undefined;
+
+		return res.json(user);
+	} catch (err) {
+		console.error("getSingleUser error:", err);
+		return res.status(500).json({
+			error: "Something went wrong while fetching the user",
 		});
+	}
 };

@@ -23,6 +23,7 @@ const {
 	updatePropertyStatus,
 	updatePropertyFeatured,
 	listOfActiveFeaturedProperties,
+	toggleWishlist,
 } = require("../controllers/property_details");
 
 router.get("/property-details/:propertyDetailsId", read); // Consolidated into a single route
@@ -74,6 +75,13 @@ router.put(
 	requireSignin,
 	isHotelOwner,
 	updatePropertyDetails
+);
+
+router.post(
+	"/property/:propertyId/wishlist/:userId/:propertyId",
+	requireSignin,
+	isAuth,
+	toggleWishlist
 );
 
 router.param("userId", userById);

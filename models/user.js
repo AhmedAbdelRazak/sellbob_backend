@@ -29,13 +29,10 @@ const userSchema = new mongoose.Schema(
 			type: String,
 			trim: true,
 			lowercase: true,
+			default: "",
 		},
 
 		salt: {
-			type: String,
-		},
-
-		userImage: {
 			type: String,
 		},
 
@@ -61,8 +58,16 @@ const userSchema = new mongoose.Schema(
 			default: true,
 		},
 
+		profilePhoto: {
+			type: Object,
+			default: {
+				public_id: "",
+				url: "",
+			},
+		},
+
 		userWishList: {
-			propertyDetails: { type: ObjectId, ref: "PropertyDetails" },
+			propertyDetails: [{ type: ObjectId, ref: "PropertyDetails" }],
 		},
 	},
 	{ timestamps: true }

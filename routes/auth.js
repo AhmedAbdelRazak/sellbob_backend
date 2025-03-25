@@ -11,6 +11,7 @@ const {
 	resetPassword,
 	googleLogin,
 	propertySignup,
+	facebookLogin,
 } = require("../controllers/auth");
 
 router.post("/signup", signup);
@@ -21,6 +22,8 @@ router.get("/signout", signout);
 router.put("/forgot-password", forgotPassword);
 router.put("/reset-password", resetPassword);
 
+// Social logins
 router.post("/google-login", googleLogin);
+router.post("/facebook-login", facebookLogin); // NEW
 
 module.exports = router;

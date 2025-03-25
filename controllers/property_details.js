@@ -41,8 +41,24 @@ exports.create = async (req, res) => {
 	}
 };
 
-exports.read = (req, res) => {
-	return res.json(req.propertyDetails);
+exports.read = async (req, res) => {
+	try {
+		// Instead of returning `req.propertyDetails` directly,
+		// we do a fresh find to properly populate belongsTo
+		const propertyDetails = await PropertyDetails.findById(
+			req.propertyDetails._id
+		).populate("belongsTo", "name email phone profilePhoto");
+		// The second parameter is the projection of fields you want
+
+		if (!propertyDetails) {
+			return res.status(400).json({ error: "Property details not found" });
+		}
+
+		return res.json(propertyDetails);
+	} catch (err) {
+		console.error(err);
+		return res.status(500).json({ error: "Something went wrong" });
+	}
 };
 
 // A helper to deeply merge fields from `source` into `target`.
@@ -572,6 +588,84 @@ exports.listOfActiveFeaturedProperties = async (req, res) => {
 		console.error("Error fetching active properties:", error);
 		return res.status(500).json({
 			error: "An error occurred while fetching active properties.",
+		});
+	}
+};
+
+exports.toggleWishlist = async (req, res) => {
+	try {
+		const userId = req.auth._id; // from requireSignin
+		const { propertyId } = req.params;
+
+		// 1) Find user
+		const user = await User.findById(userId);
+		if (!user) {
+			return res
+				.status(404)
+				.json({ success: false, message: "User not found." });
+		}
+
+		// 2) Find property
+		const property = await PropertyDetails.findById(propertyId);
+		if (!property) {
+			return res
+				.status(404)
+				.json({ success: false, message: "Property not found." });
+		}
+
+		// user.userWishList.propertyDetails => array of ObjectIds
+		// property.userWishList.user => array of ObjectIds
+
+		let inWishlist = false;
+
+		// 3) Check if user already has this property in wishlist
+		const userHasProperty = user.userWishList.propertyDetails.some((pId) =>
+			pId.equals(propertyId)
+		);
+
+		if (userHasProperty) {
+			// => User is removing property from wishlist
+
+			// Remove propertyId from user's array
+			user.userWishList.propertyDetails =
+				user.userWishList.propertyDetails.filter(
+					(pId) => !pId.equals(propertyId)
+				);
+
+			// Remove userId from property's array
+			property.userWishList.user = property.userWishList.user.filter(
+				(uId) => !uId.equals(userId)
+			);
+
+			inWishlist = false;
+		} else {
+			// => User is adding property to wishlist
+
+			// Add propertyId to user's array (push if not present)
+			user.userWishList.propertyDetails.push(propertyId);
+
+			// Add userId to property's array
+			property.userWishList.user.push(userId);
+
+			inWishlist = true;
+		}
+
+		// 4) Save the updated user & property
+		await user.save();
+		await property.save();
+
+		return res.json({
+			success: true,
+			message: inWishlist
+				? "Property added to your wishlist."
+				: "Property removed from your wishlist.",
+			inWishlist,
+		});
+	} catch (err) {
+		console.error("Toggle wishlist error:", err);
+		return res.status(500).json({
+			success: false,
+			message: "Server error toggling wishlist.",
 		});
 	}
 };

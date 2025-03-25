@@ -101,7 +101,7 @@ const propertyDetailsSchema = new mongoose.Schema(
 		},
 
 		userWishList: {
-			user: { type: ObjectId, ref: "User" },
+			user: [{ type: ObjectId, ref: "User" }],
 		},
 
 		amenities: {
