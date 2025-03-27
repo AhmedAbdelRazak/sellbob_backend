@@ -3,6 +3,7 @@ const User = require("../models/user");
 const mongoose = require("mongoose");
 const _ = require("lodash");
 const axios = require("axios");
+const Appointment = require("../models/appointment");
 
 exports.propertyTypeById = async (req, res, next, id) => {
 	// 1) Validate ID
@@ -276,7 +277,7 @@ exports.getPropertyDetails = (req, res) => {
 
 exports.listForAdmin = async (req, res) => {
 	try {
-		// Query params
+		// 1) Parse query params
 		const page = parseInt(req.query.page) || 1;
 		const limit = parseInt(req.query.limit) || 20;
 		const skip = (page - 1) * limit;
@@ -285,49 +286,63 @@ exports.listForAdmin = async (req, res) => {
 		const active = req.query.active; // "true", "false", or undefined
 		const featured = req.query.featured; // "true", "false", or undefined
 
-		/* ----------------------------------------------------------------
-		 *  1) top3: from all properties (unfiltered) for scoreboard
-		 * ----------------------------------------------------------------*/
+		// 2) top3: from all properties (unfiltered) for scoreboard
 		const top3Docs = await PropertyDetails.find({})
 			.sort({ userViews: -1 })
 			.limit(3)
-			.select("propertyName userViews");
+			.select("propertyName userViews")
+			.lean();
 
 		const top3 = top3Docs.map((p) => ({
 			name: p.propertyName,
 			views: p.userViews || 0,
 		}));
 
-		/* ----------------------------------------------------------------
-		 *  2) Fetch all agents (role=2000)
-		 * ----------------------------------------------------------------*/
+		// 3) "overallWishlists": total wishlisted across *all* properties
+		const wishlistAgg = await PropertyDetails.aggregate([
+			{
+				$project: {
+					// wlCount is the size of userWishList.user array
+					wlCount: { $size: "$userWishList.user" },
+				},
+			},
+			{
+				$group: {
+					_id: null,
+					totalWishlists: { $sum: "$wlCount" },
+				},
+			},
+		]);
+		const overallWishlists = wishlistAgg?.[0]?.totalWishlists || 0;
+
+		// 4) Fetch all agents (role=2000)
 		const allAgents = await User.find({ role: 2000 })
 			.select("_id name email phone")
 			.lean();
 
-		/* ----------------------------------------------------------------
-		 *  3) For each agent, fetch their properties & filter them
-		 * ----------------------------------------------------------------*/
 		let allRows = [];
+		// We'll keep track of *all property IDs* we end up including, for upcoming appointments
+		const propertyIdSet = new Set();
 
+		// 5) For each agent, fetch their properties & filter them
 		for (let agent of allAgents) {
-			// 3A) Check if agent's name/email/phone matches search
+			// 5A) Check if agent matches search
 			const agentMatchesSearch = search
 				? new RegExp(search, "i").test(agent.name) ||
 				  new RegExp(search, "i").test(agent.email) ||
 				  new RegExp(search, "i").test(agent.phone)
 				: false;
 
-			// 3B) fetch agent's properties
+			// 5B) fetch agent's properties (including userViewsByDays for the 30-day aggregation)
 			const props = await PropertyDetails.find({
 				belongsTo: agent._id,
 			})
 				.select(
-					"propertyName propertyCity propertyState propertyCountry userViews propertyStatus propertyPrice activeProperty featured belongsTo"
-				)
+					"propertyName propertyCity propertyState propertyCountry userViews propertyStatus propertyPrice activeProperty featured belongsTo userViewsByDays"
+				) // add userViewsByDays here
 				.lean();
 
-			// 3C) Filter by (active), (featured), (search)
+			// 5C) Filter by (active, featured, search)
 			const matchedProps = props.filter((p) => {
 				// 1) If active=“true” or “false”
 				if (active === "true" && p.activeProperty !== true) return false;
@@ -336,11 +351,10 @@ exports.listForAdmin = async (req, res) => {
 				// 2) If featured="true", keep only p.featured===true
 				if (featured === "true" && p.featured !== true) return false;
 
-				// 2B) If featured="false", exclude only p.featured===true
-				// so p.featured === false or undefined => pass
+				// 3) If featured="false", exclude p.featured===true
 				if (featured === "false" && p.featured === true) return false;
 
-				// 3) If search is provided, match propertyName/city/state
+				// 4) If search is provided, match propertyName/city/state or agent
 				if (search) {
 					const propertyMatches = [
 						p.propertyName,
@@ -350,29 +364,74 @@ exports.listForAdmin = async (req, res) => {
 						.filter(Boolean)
 						.some((field) => new RegExp(search, "i").test(field));
 
-					// keep if agent matched OR property matched
+					// Keep if agent matched or property matched
 					return agentMatchesSearch || propertyMatches;
 				}
 
-				// if no search => keep anything that passes the above filters
+				// If no search => keep
 				return true;
 			});
 
-			// 3D) Build table rows
+			// 5D) Build table rows
 			if (matchedProps.length > 0) {
-				// push one row per matching property
 				for (let p of matchedProps) {
 					const loc = [p.propertyCity, p.propertyState, p.propertyCountry]
 						.filter(Boolean)
 						.join(", ");
 
+					// 5D.1) Collect propertyId for upcoming appointments aggregator
+					propertyIdSet.add(String(p._id));
+
+					// 5D.2) Build "viewsPerDay" array for last 30 days
+					const now = new Date();
+					const startDate = new Date(now);
+					startDate.setDate(now.getDate() - 30); // 30 days ago
+					startDate.setHours(0, 0, 0, 0);
+
+					const dailyCountMap = {}; // { 'MM/DD/YYYY': number }
+
+					// If userViewsByDays is large, we could do advanced logic,
+					// but here we do it in-memory:
+					(p.userViewsByDays || []).forEach((entry) => {
+						const entryDate = new Date(entry.Date);
+						if (entryDate >= startDate) {
+							// Convert to mm/dd/yyyy
+							const mm = String(entryDate.getMonth() + 1).padStart(2, "0");
+							const dd = String(entryDate.getDate()).padStart(2, "0");
+							const yyyy = entryDate.getFullYear();
+							const dateStr = `${mm}/${dd}/${yyyy}`;
+
+							dailyCountMap[dateStr] = (dailyCountMap[dateStr] || 0) + 1;
+						}
+					});
+
+					// Transform map => array
+					const viewsPerDay = Object.entries(dailyCountMap).map(
+						([date, count]) => ({
+							date,
+							count,
+						})
+					);
+
+					// Optionally, sort by ascending date
+					viewsPerDay.sort((a, b) => {
+						// parse date 'MM/DD/YYYY' into a real date
+						const [am, ad, ay] = a.date.split("/");
+						const [bm, bd, by] = b.date.split("/");
+						const dateA = new Date(+ay, +am - 1, +ad);
+						const dateB = new Date(+by, +bm - 1, +bd);
+						return dateA - dateB;
+					});
+
 					allRows.push({
 						key: `p-${p._id}`,
+						propertyId: p._id.toString(),
 						property: p.propertyName || "Untitled",
 						featured: p.featured,
 						location: loc || "N/A",
 						views: p.userViews || 0,
-						appointments: 0, // or your logic
+						// We'll fill appointments later
+						appointments: 0,
 						status: p.propertyStatus || "N/A",
 						price: p.propertyPrice
 							? `${p.propertyPrice.toLocaleString()}`
@@ -381,13 +440,13 @@ exports.listForAdmin = async (req, res) => {
 						ownerName: agent.name,
 						ownerEmail: agent.email,
 						ownerPhone: agent.phone,
-						ownerId: agent._id,
+						ownerId: agent._id.toString(),
+						// The new aggregated array
+						viewsPerDay,
 					});
 				}
 			} else {
-				// No matched properties => possibly show “N/A” row
-				// only if not filtering by active or featured,
-				// and either no search or the agent matched
+				// No matched props => possibly show "N/A" row if no filters
 				const noActiveFilter = active === undefined || active === null;
 				const noFeaturedFilter = featured === undefined || featured === null;
 
@@ -395,6 +454,7 @@ exports.listForAdmin = async (req, res) => {
 					if (!search || agentMatchesSearch) {
 						allRows.push({
 							key: `u-${agent._id}`,
+							propertyId: null,
 							property: "N/A",
 							location: "N/A",
 							featured: "No Property",
@@ -406,16 +466,50 @@ exports.listForAdmin = async (req, res) => {
 							ownerName: agent.name,
 							ownerEmail: agent.email,
 							ownerPhone: agent.phone,
-							ownerId: agent._id,
+							ownerId: agent._id.toString(),
+							viewsPerDay: [], // no data
 						});
 					}
 				}
 			}
 		}
 
-		/* ----------------------------------------------------------------
-		 *  4) In-memory pagination of allRows
-		 * ----------------------------------------------------------------*/
+		// 6) Now that we have all propertyIds, let's find upcoming appointment counts
+		const propertyIds = Array.from(propertyIdSet).map(
+			(id) => new mongoose.Types.ObjectId(id)
+		);
+		// "now" for upcoming
+		const now = new Date();
+
+		const upcomingAppointments = await Appointment.aggregate([
+			{
+				$match: {
+					propertyId: { $in: propertyIds },
+					appointmentDate: { $gte: now }, // future or today
+				},
+			},
+			{
+				$group: {
+					_id: "$propertyId",
+					count: { $sum: 1 },
+				},
+			},
+		]);
+
+		// Build a map: propertyId => count
+		const upcomingMap = {};
+		for (let doc of upcomingAppointments) {
+			upcomingMap[doc._id.toString()] = doc.count;
+		}
+
+		// 7) Attach the "appointments" count to each row
+		allRows.forEach((row) => {
+			if (row.propertyId) {
+				row.appointments = upcomingMap[row.propertyId] || 0;
+			}
+		});
+
+		// 8) In-memory pagination
 		const totalCount = allRows.length;
 		const startIndex = skip;
 		const endIndex = startIndex + limit;
@@ -423,6 +517,7 @@ exports.listForAdmin = async (req, res) => {
 
 		return res.json({
 			top3,
+			overallWishlists, // new KPI
 			tableData: pageRows,
 			pagination: {
 				page,
@@ -667,5 +762,69 @@ exports.toggleWishlist = async (req, res) => {
 			success: false,
 			message: "Server error toggling wishlist.",
 		});
+	}
+};
+
+// controllers/property_details.js
+
+exports.addPropertyView = async (req, res) => {
+	try {
+		const { propertyDetailsId } = req.params;
+
+		// 1) Check if the property exists
+		const existing = await PropertyDetails.findById(propertyDetailsId).lean();
+		if (!existing) {
+			return res.status(404).json({ error: "Property not found" });
+		}
+
+		// 2) Extract user info from req.body
+		//    If fields aren't present, default to "Guest"
+		let userName = req.body.userName || "Guest";
+		let email = req.body.email || "guest@example.com";
+		let userId = req.body.userId || null;
+
+		// 3) Floor the Date to the hour
+		const now = new Date();
+		now.setMinutes(0, 0, 0);
+
+		// Build the view record
+		const viewEntry = {
+			userName,
+			Email: email,
+			_id: userId, // store userId if passed
+			Date: now,
+		};
+
+		// 4) Atomic update: increment userViews, push a new entry, keep only last 2000
+		const updated = await PropertyDetails.findByIdAndUpdate(
+			propertyDetailsId,
+			{
+				$inc: { userViews: 1 },
+				$push: {
+					userViewsByDays: {
+						$each: [viewEntry],
+						$slice: -2000, // keep only the newest 2000 records
+					},
+				},
+			},
+			{ new: true } // return updated doc
+		).lean();
+
+		if (!updated) {
+			return res
+				.status(404)
+				.json({ error: "Property not found (after update)." });
+		}
+
+		return res.json({
+			success: true,
+			message: "View recorded successfully",
+			userViews: updated.userViews,
+			lastViewEntry: viewEntry,
+			totalViewEntries: updated.userViewsByDays.length,
+		});
+	} catch (err) {
+		console.error("Error incrementing property views:", err);
+		return res.status(500).json({ error: "Internal server error" });
 	}
 };

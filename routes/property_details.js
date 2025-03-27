@@ -24,6 +24,7 @@ const {
 	updatePropertyFeatured,
 	listOfActiveFeaturedProperties,
 	toggleWishlist,
+	addPropertyView,
 } = require("../controllers/property_details");
 
 router.get("/property-details/:propertyDetailsId", read); // Consolidated into a single route
@@ -83,6 +84,8 @@ router.post(
 	isAuth,
 	toggleWishlist
 );
+
+router.post("/property-details/view/:propertyDetailsId", addPropertyView);
 
 router.param("userId", userById);
 router.param("propertyDetailsId", propertyTypeById);
