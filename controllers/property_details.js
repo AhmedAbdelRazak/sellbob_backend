@@ -668,7 +668,7 @@ exports.listOfActiveFeaturedProperties = async (req, res) => {
 			activePropertyByAgent: true,
 			activeProperty: true,
 			featured: true,
-		});
+		}).populate("belongsTo", "name email phone profilePhoto");
 
 		// If no properties are found, return a 404
 		if (!properties.length) {
@@ -826,5 +826,62 @@ exports.addPropertyView = async (req, res) => {
 	} catch (err) {
 		console.error("Error incrementing property views:", err);
 		return res.status(500).json({ error: "Internal server error" });
+	}
+};
+
+exports.listOfPropertiesToSpecificAgent = async (req, res) => {
+	try {
+		const { agentId } = req.params;
+
+		// Find properties where belongsTo = agentId, activeProperty = true, activePropertyByAgent = true
+		const properties = await PropertyDetails.find({
+			belongsTo: agentId,
+			activeProperty: true,
+			activePropertyByAgent: true,
+		})
+			.populate("belongsTo", "name email phone profilePhoto") // if you want the agent's info
+			.exec();
+
+		// If no properties found:
+		if (!properties.length) {
+			return res.status(404).json({
+				message: "No active properties found for this agent.",
+			});
+		}
+
+		// Return the list of active properties belonging to this agent
+		return res.status(200).json(properties);
+	} catch (error) {
+		console.error("Error fetching agent's active properties:", error);
+		return res.status(500).json({
+			error: "An error occurred while fetching agent's active properties.",
+		});
+	}
+};
+
+exports.listOfFilteredProperties = async (req, res) => {
+	try {
+		// Find properties where belongsTo = agentId, activeProperty = true, activePropertyByAgent = true
+		const properties = await PropertyDetails.find({
+			activeProperty: true,
+			activePropertyByAgent: true,
+		})
+			.populate("belongsTo", "name email phone profilePhoto") // if you want the agent's info
+			.exec();
+
+		// If no properties found:
+		if (!properties.length) {
+			return res.status(404).json({
+				message: "No active properties found for this agent.",
+			});
+		}
+
+		// Return the list of active properties belonging to this agent
+		return res.status(200).json(properties);
+	} catch (error) {
+		console.error("Error fetching agent's active properties:", error);
+		return res.status(500).json({
+			error: "An error occurred while fetching agent's active properties.",
+		});
 	}
 };

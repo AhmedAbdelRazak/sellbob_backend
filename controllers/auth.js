@@ -91,7 +91,7 @@ exports.signin = async (req, res) => {
 		const token = jwt.sign(
 			{ _id: user._id, role: user.role },
 			process.env.JWT_SECRET,
-			{ expiresIn: "7d" }
+			{ expiresIn: "30d" }
 		);
 
 		// Persist token as 't' in cookie
@@ -105,10 +105,11 @@ exports.signin = async (req, res) => {
 			role,
 			activePoints,
 			activeUser,
-			employeeImage,
+			profilePhoto,
 			userRole,
 			userBranch,
 			userStore,
+			userWishList,
 		} = user;
 
 		return res.json({
@@ -121,10 +122,11 @@ exports.signin = async (req, res) => {
 				role,
 				activePoints,
 				activeUser,
-				employeeImage,
+				profilePhoto,
 				userRole,
 				userBranch,
 				userStore,
+				userWishList,
 			},
 		});
 	} catch (error) {

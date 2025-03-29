@@ -25,6 +25,8 @@ const {
 	listOfActiveFeaturedProperties,
 	toggleWishlist,
 	addPropertyView,
+	listOfPropertiesToSpecificAgent,
+	listOfFilteredProperties,
 } = require("../controllers/property_details");
 
 router.get("/property-details/:propertyDetailsId", read); // Consolidated into a single route
@@ -65,7 +67,12 @@ router.put(
 	updatePropertyFeatured
 );
 
+router.get("/list-of-filtered-properties", listOfFilteredProperties);
 router.get("/list-of-agent-properties-active", listOfActivePropertiesForUser);
+router.get(
+	"/property/list-of-agent-properties-active-public-page/:agentId",
+	listOfPropertiesToSpecificAgent
+);
 router.get(
 	"/list-of-agent-properties-active-featured",
 	listOfActiveFeaturedProperties
